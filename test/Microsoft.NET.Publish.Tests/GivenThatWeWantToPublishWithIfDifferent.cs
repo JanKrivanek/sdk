@@ -455,5 +455,76 @@ class Program { static void Main() => Console.WriteLine(""Hello""); }";
                 .Where(f => !f.StartsWith(publishDirectory.FullName));
             potentialEscapedFiles.Should().BeEmpty("Content file should not escape to directories outside publish folder");
         }
+
+        [Fact]
+        public void It_propagates_IfDifferent_from_CopyToOutputDirectory_to_CopyToPublishDirectory()
+        {
+            // DefaultCopyToPublishDirectoryMetadata should propagate CopyToOutputDirectory=IfDifferent
+            // to CopyToPublishDirectory when CopyToPublishDirectory is not explicitly set.
+            var testProject = new TestProject()
+            {
+                Name = "IfDifferentPropagateFromOutput",
+                TargetFrameworks = ToolsetInfo.CurrentTargetFramework,
+                IsExe = true
+            };
+
+            testProject.SourceFiles["Program.cs"] = "class Program { static void Main() { } }";
+            testProject.SourceFiles["output-data.txt"] = "Output data";
+
+            var testAsset = TestAssetsManager.CreateTestProject(testProject);
+
+            var projectFile = Path.Combine(testAsset.Path, testProject.Name, $"{testProject.Name}.csproj");
+            var projectContent = File.ReadAllText(projectFile);
+            // Only set CopyToOutputDirectory - CopyToPublishDirectory should be inherited via DefaultCopyToPublishDirectoryMetadata
+            projectContent = projectContent.Replace("</Project>", @"
+  <ItemGroup>
+    <Content Include=""output-data.txt"" CopyToOutputDirectory=""IfDifferent"" />
+  </ItemGroup>
+</Project>");
+            File.WriteAllText(projectFile, projectContent);
+
+            var publishCommand = new PublishCommand(testAsset);
+            publishCommand.Execute().Should().Pass();
+
+            var publishDirectory = publishCommand.GetOutputDirectory(testProject.TargetFrameworks);
+
+            // File should be published even though CopyToPublishDirectory was not explicitly set
+            publishDirectory.Should().HaveFile("output-data.txt");
+            File.ReadAllText(Path.Combine(publishDirectory.FullName, "output-data.txt")).Should().Be("Output data");
+        }
+
+        [Fact]
+        public void It_publishes_EmbeddedResource_files_with_IfDifferent_metadata()
+        {
+            var testProject = new TestProject()
+            {
+                Name = "PublishEmbeddedResourceWithIfDifferent",
+                TargetFrameworks = ToolsetInfo.CurrentTargetFramework,
+                IsExe = true
+            };
+
+            testProject.SourceFiles["Program.cs"] = "class Program { static void Main() { } }";
+            testProject.SourceFiles["resource.txt"] = "Resource file content";
+
+            var testAsset = TestAssetsManager.CreateTestProject(testProject);
+
+            var projectFile = Path.Combine(testAsset.Path, testProject.Name, $"{testProject.Name}.csproj");
+            var projectContent = File.ReadAllText(projectFile);
+            projectContent = projectContent.Replace("</Project>", @"
+  <ItemGroup>
+    <EmbeddedResource Include=""resource.txt"" CopyToPublishDirectory=""IfDifferent"" />
+  </ItemGroup>
+</Project>");
+            File.WriteAllText(projectFile, projectContent);
+
+            var publishCommand = new PublishCommand(testAsset);
+            publishCommand.Execute().Should().Pass();
+
+            var publishDirectory = publishCommand.GetOutputDirectory(testProject.TargetFrameworks);
+
+            // EmbeddedResource with IfDifferent should be published
+            publishDirectory.Should().HaveFile("resource.txt");
+            File.ReadAllText(Path.Combine(publishDirectory.FullName, "resource.txt")).Should().Be("Resource file content");
+        }
     }
 }
